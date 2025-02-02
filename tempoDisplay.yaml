@@ -380,7 +380,7 @@ time:
                 capture_response: true
                 max_response_buffer_size: 50000
                 headers:
-                    Authorization: "Basic =="
+                    Authorization: "Basic OTNiODcxYWQtYzMzYy00NjI0LWIwMjEtN2Y5YzVjOWJiYjZkOmIzODQzYTkzLTZlMTQtNDczOS04NjUwLTVlMmU5ODZjODYwZA=="
                     Accept: "application/json"
                     Content-Type: application/x-www-form-urlencoded
                 on_response:
