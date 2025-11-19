@@ -2,17 +2,15 @@
 # Substitution Variables
 ################################################################################
 external_components:
-  # makes http_request work with content-length: -1
-  - source: github://hlfcode/esphome@main
-# - source: github://pr#6953
-    components: [ http_request ]
-  
+  - source: github://pr#9353
+    components: [http_request]
+
 substitutions:
   device_name: tempodisplay
   device_wifi_name: tempodisplay
   friendly_name: Tempo Display
-  device_ip_address: 192.168.0.128
-  device_sampling_time: 5s
+  device_ip_address: 192.168.254.249
+  device_sampling_time: 1s
 
 ################################################################################
 # Globals
@@ -155,12 +153,10 @@ esphome:
     board_build.f_flash: 80000000L
     board_build.f_cpu: 240000000L
   on_boot:
-      priority: -100
       then:
       - light.turn_on:
             id: back_light
             brightness: 100% 
-      - lvgl.widget.hide: boot_screen
 
 http_request:
     timeout: 10s
@@ -171,25 +167,12 @@ logger:
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
+  fast_connect: true
   on_connect:
-    - lvgl.label.update:
-        id: esphome_ip_label
-        text:
-          format: "IP Address: %s"
-          args: [ 'id(ip_address).state.c_str()' ] 
-          
-    - lvgl.label.update:
-        id: esphome_ssid_label
-        text:
-          format: "SSID: %s"
-          args: [ 'id(ssid).state.c_str()' ] 
-          
-    - lvgl.label.update:
-        id: esphome_mac_label
-        text:
-          format: "MAC Address: %s"
-          args: [ 'id(mac_address).state.c_str()' ] 
-          
+    - lambda: |-
+        ESP_LOGI("main", "WiFi connected!");
+    - delay: 3s   # attend 3 secondes
+    - lvgl.widget.hide: boot_screen
  
 web_server:
   port: 80
@@ -223,13 +206,57 @@ spi:
     data_pins: [21, 48, 40, 39]
 
 i2c:
-  - sda: 4
-    scl: 8
+  sda:
+    number: 4
+  scl:
+    number: 8
+  id: touchscreen_bus
+  frequency: 100kHz
+  scan: true
 
 output:
   - id: gpio_backlight_pwm
     platform: ledc
     pin: 1
+
+
+
+display:
+  - id: main_display
+    platform: qspi_dbi
+#    platform: sdl
+    dimensions:
+      width: 320
+      height: 480
+    model: CUSTOM
+    data_rate: 40MHz
+    rotation: 270
+    cs_pin:
+      number: 45
+      ignore_strapping_warning: true
+    draw_from_origin: true
+    update_interval: 1s
+    auto_clear_enabled: false
+    
+
+
+touchscreen:
+  - id: main_touchscreen
+    platform: axs15231
+    display: main_display
+    i2c_id: touchscreen_bus
+    update_interval: 30ms
+    calibration:
+      x_min: 0
+      x_max: 480
+      y_min: 0
+      y_max: 320
+    transform:
+        swap_xy: true
+        mirror_x: true
+        mirror_y: false
+    on_touch:
+      - lambda: |-
 
 
 color:
@@ -305,59 +332,32 @@ font:
     glyphs: "!\"%()+=,-_.:°0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz/\\[]|&@#'"
 
 image:
-  - file: https://esphome.io/_static/favicon-512x512.png
+  - file: https://www.iconarchive.com/download/i149661/simpleicons-team/simple/esphome.512.png
     id: boot_logo
     resize: 200x200
     type: RGB565
-    use_transparency: true
     
 
 
-display:
-  - id: main_display
-    platform: qspi_dbi
-#    platform: sdl
-    dimensions:
-      height: 480
-      width: 320
-    model: CUSTOM
-    data_rate: 40MHz
-    rotation: 270
-    cs_pin:
-      number: 45
-      ignore_strapping_warning: true
-    draw_from_origin: true
-    update_interval: 1s
-    auto_clear_enabled: false
-    
-
-
-touchscreen:
-  - id: main_touchscreen
-    platform: axs15231
-    transform:
-        swap_xy: true
-        mirror_x: false
-        mirror_y: true
+          
     
 ################################################################################
 # Interval
 ################################################################################
 interval:
-  - interval: 10s
+  - interval: 1s
     then:
       - if:
           condition:
             wifi.connected:
           then:
             - lambda: |-
-                ESP_LOGI("custom", "wifi on");
                 id(wifi_connection) = true;
-
+                ESP_LOGI("main", "wifi connected");
           else:
             - lambda: |-
-                ESP_LOGI("custom", "wifi off");
                 id(wifi_connection) = false;
+                ESP_LOGI("main", "wifi not connected");
       - logger.log: "Interval"
       
 
@@ -369,223 +369,235 @@ time:
       - 192.168.254.1
     on_time_sync:
         then:
-          - lambda: >-
-                ESP_LOGI("custom", "ON LOOP!");
-          - http_request.post:
-                url: !lambda |-
-                  ESP_LOGI("custom", "get token");
-                  static std::string url = "https://digital.iservices.rte-france.com/token/oauth/";
-                  ESP_LOGI("custom", "URL is: %s", url.c_str());
-                  return url.c_str();
-                capture_response: true
-                max_response_buffer_size: 50000
-                headers:
-                    Authorization: "Basic OTNiODcxYWQtYzMzYy00NjI0LWIwMjEtN2Y5YzVjOWJiYjZkOmIzODQzYTkzLTZlMTQtNDczOS04NjUwLTVlMmU5ODZjODYwZA=="
-                    Accept: "application/json"
-                    Content-Type: application/x-www-form-urlencoded
-                on_response:
-                    then:
-                        - lambda: |-
-                            ESP_LOGI("custom", "Response: %d %d %s", response->status_code,body.length(), body.c_str());
-                            json::parse_json(body, [](JsonObject root) -> bool {
-                                String val = root["access_token"];
-                                ESP_LOGI("custom", "token: %s", val.c_str());
-                                id(token) = std::string(val);
-                                return true;
-                            });
-                          
-          - http_request.get:
-                url: !lambda |-
-                  static ESPTime now = id(esptime).now();
-                  static ESPTime tomorrow = id(esptime).now();
-                  
-                  ESP_LOGI("custom", "esp time");
-                  
-                  tomorrow.increment_day();
+          - if:
+              condition:
+                wifi.connected:
+              then:
+                - lambda: >-
+                      ESP_LOGI("custom", "ON LOOP!");
+                - http_request.post:
+                      url: !lambda |-
+                        ESP_LOGI("custom", "get token");
+                        static std::string url = "https://digital.iservices.rte-france.com/token/oauth/";
+                        ESP_LOGI("custom", "URL is: %s", url.c_str());
+                        return url.c_str();
+                      capture_response: true
+                      max_response_buffer_size: 50000
+                      request_headers:
+                          Authorization: "Basic OTNiODcxYWQtYzMzYy00NjI0LWIwMjEtN2Y5YzVjOWJiYjZkOmIzODQzYTkzLTZlMTQtNDczOS04NjUwLTVlMmU5ODZjODYwZA=="
+                          Accept: "application/json"
+                          Content-Type: application/x-www-form-urlencoded
+                      on_response:
+                          then:
+                              - lambda: |-
+                                  ESP_LOGI("custom", "Response: %d %d %s", response->status_code,body.length(), body.c_str());
+                                  json::parse_json(body, [](JsonObject root) -> bool {
+                                      const char* val = root["access_token"];
+                                      ESP_LOGI("custom", "token: %s", val);
+                                      id(token) = std::string(val);
+                                      return true;
+                                  });
+                                
+                - http_request.get:
+                      url: !lambda |-
+                        static ESPTime now = id(esptime).now();
+                        static ESPTime tomorrow = id(esptime).now();
+                        
+                        ESP_LOGI("custom", "esp time");
+                        
+                        tomorrow.increment_day();
 
-                  uint16_t year = now.year;
-                  if (now.month>=1 && now.month<=8) {
-                    year = now.year-1;
-                  }
-                  
-                  static std::string start = "";
-                  start = start + esphome::to_string (year);
-                  start = start + "-08-31T00:00:00+01:00";
+                        uint16_t year = now.year;
+                        if (now.month>=1 && now.month<=8) {
+                          year = now.year-1;
+                        }
+                        
+                        static std::string start = "";
+                        start = start + esphome::to_string (year);
+                        start = start + "-08-31T00:00:00+01:00";
 
-                  
-                  
-                  static ESPTime end = id(esptime).now();
-                  end.increment_day();
-                  end.increment_day();
-                  
-                  static std::string url = "https://digital.iservices.rte-france.com/open_api/tempo_like_supply_contract/v1/tempo_like_calendars?start_date=" + start + "&end_date=" + end.strftime("%Y-%m-%dT00:00:00+01:00") + "&fallback_status=true";
-                  
-                  ESP_LOGI("custom", "URL is: %s", url.c_str());
-                  return url.c_str();
-                capture_response: true
-                max_response_buffer_size: 50000
-                headers:
-                    Authorization: !lambda |-
-                        static std::string bearer = "Bearer ";
-                        bearer = bearer + " " + id(token);
-                        return bearer.c_str();
-                    Accept: "application/json"
-                on_response:
-                    then:
-                        - lambda: |-
-                            ESP_LOGI("custom", "Response: %d %d %s", response->status_code,body.length(), body.c_str());
-                            json::parse_json(body, [](JsonObject root) -> bool {
-                            
-                                static ESPTime now = id(esptime).now();
-                                static ESPTime tomorrow = id(esptime).now();
-                                tomorrow.increment_day();
-                                
-                                JsonObject calendar = root["tempo_like_calendars"];
-                                JsonArray values= calendar["values"];
-                                
-                                
-                                static std::string todayDt = now.strftime("%Y-%m-%dT00:00:00+01:00");
-                                static std::string tomorrowDt = tomorrow.strftime("%Y-%m-%dT00:00:00+01:00");
-                                int nbjourRestantRed = 0;
-                                int nbjourRestantWhite = 0;
-                                int nbjourRestantBlue = 0;
-                                
-                                for (JsonObject elem : values) {
-                                    String str = elem["start_date"];
-                                    String val = elem["value"];
-                                    ESP_LOGI("custom", "Response: %s", str.c_str());
-                                    if (strcmp(str.c_str(),tomorrowDt.c_str())==0) {
-                                        ESP_LOGI("custom", "Tomorrow");
-                                        id(tomorrow_color) = std::string(val);
-                                    }
-                                    if (strcmp(str.c_str(),todayDt.c_str())==0) {
-                                        ESP_LOGI("custom", "Today");
-                                        id(today_color) = std::string(val);
-                                    }
-                                    
-                                    if (strcmp(val.c_str(), "BLUE")==0) {
-                                        nbjourRestantBlue++;
-                                    }
-                                    else if (strcmp(val.c_str(), "WHITE")==0) {
-                                        nbjourRestantWhite++;
-                                    }
-                                    else if (strcmp(val.c_str(), "RED")==0) {
-                                        nbjourRestantRed++;
-                                    }
-                                }       
-                                int nbjourTotalRed = 22;
-                                int nbjourTotalWhite = 43;
-                                int nbjourTotalBlue = 300;
-                                
-                                id(redTotal) = nbjourTotalRed;
-                                id(redRestant) = nbjourRestantRed;
-                                id(whiteTotal) = nbjourTotalWhite;
-                                id(whiteRestant) = nbjourRestantWhite;
-                                id(blueTotal) = nbjourTotalBlue;
-                                id(blueRestant) = nbjourRestantBlue;
+                        static ESPTime end = id(esptime).now();
+                        end.increment_day();
+                        end.increment_day();
+                        
+                        static std::string url = "https://digital.iservices.rte-france.com/open_api/tempo_like_supply_contract/v1/tempo_like_calendars?start_date=" + start + "&end_date=" + end.strftime("%Y-%m-%dT00:00:00+01:00") + "&fallback_status=true";
+                        
+                        ESP_LOGI("custom", "URL is: %s", url.c_str());
+                        return url.c_str();
+                      capture_response: true
+                      max_response_buffer_size: 50000
+                      request_headers:
+                          Authorization: !lambda |-
+                              static std::string bearer = "Bearer ";
+                              bearer = bearer + " " + id(token);
+                              return bearer.c_str();
+                          Accept: "application/json"
+                      on_response:
+                          then:
+                              - lambda: |-
+                                  ESP_LOGI("custom", "Response: %d %d %s", response->status_code,body.length(), body.c_str());
+                                  json::parse_json(body, [](JsonObject root) -> bool {
+                                  
+                                      static ESPTime now = id(esptime).now();
+                                      static ESPTime tomorrow = id(esptime).now();
+                                      tomorrow.increment_day();
+                                      
+                                      JsonObject calendar = root["tempo_like_calendars"];
+                                      JsonArray values= calendar["values"];
+                                      
+                                      
+                                      static std::string todayDt = now.strftime("%Y-%m-%dT00:00:00+01:00");
+                                      static std::string tomorrowDt = tomorrow.strftime("%Y-%m-%dT00:00:00+01:00");
+                                      int nbjourRestantRed = 0;
+                                      int nbjourRestantWhite = 0;
+                                      int nbjourRestantBlue = 0;
+                                      
+                                      for (JsonObject elem : values) {
+                                          const char* str = elem["start_date"];
+                                          const char* val = elem["value"];
+                                          ESP_LOGI("custom", "Response: %s", str);
+                                          if (strcmp(str,tomorrowDt.c_str())==0) {
+                                              ESP_LOGI("custom", "Tomorrow");
+                                              id(tomorrow_color) = std::string(val);
+                                          }
+                                          if (strcmp(str,todayDt.c_str())==0) {
+                                              ESP_LOGI("custom", "Today");
+                                              id(today_color) = std::string(val);
+                                          }
+                                          
+                                          if (strcmp(val, "BLUE")==0) {
+                                              nbjourRestantBlue++;
+                                          }
+                                          else if (strcmp(val, "WHITE")==0) {
+                                              nbjourRestantWhite++;
+                                          }
+                                          else if (strcmp(val, "RED")==0) {
+                                              nbjourRestantRed++;
+                                          }
+                                      }       
+                                      int nbjourTotalRed = 22;
+                                      int nbjourTotalWhite = 43;
+                                      int nbjourTotalBlue = 300;
+                                      
+                                      id(redTotal) = nbjourTotalRed;
+                                      id(redRestant) = nbjourRestantRed;
+                                      id(whiteTotal) = nbjourTotalWhite;
+                                      id(whiteRestant) = nbjourRestantWhite;
+                                      id(blueTotal) = nbjourTotalBlue;
+                                      id(blueRestant) = nbjourRestantBlue;
 
-                                ESP_LOGI("custom", "ColorRed: %d %d", nbjourTotalRed, nbjourRestantRed);
-                                ESP_LOGI("custom", "ColorWhite: %d %d", nbjourTotalWhite, nbjourRestantWhite);
-                                ESP_LOGI("custom", "ColorBlue: %d %d", nbjourTotalBlue, nbjourRestantBlue);
+                                      ESP_LOGI("custom", "ColorRed: %d %d", nbjourTotalRed, nbjourRestantRed);
+                                      ESP_LOGI("custom", "ColorWhite: %d %d", nbjourTotalWhite, nbjourRestantWhite);
+                                      ESP_LOGI("custom", "ColorBlue: %d %d", nbjourTotalBlue, nbjourRestantBlue);
 
-                                return true;
-                            });
+                                      return true;
+                                  });
+              else:
+                - lambda: >-
+                      ESP_LOGI("custom", "No network, wait...");
     on_time:
       - seconds: /5
         then: 
-          - http_request.get:
-                url: !lambda |-
-                    static std::string url = "http://emoncms.clae.net/feed/value.json?id=258&apikey=16a80b4fd5c8422d73508519cca5562e";
-                    ESP_LOGI("custom", "URL is: %s", url.c_str());
-                    return url.c_str();
-                capture_response: true
-                max_response_buffer_size: 50000
-                on_response:
-                    then:
-                        - lambda: |-
-                            ESP_LOGI("custom", "Response2: %d %d %s", response->status_code,body.length(), body.c_str());
-                            float consoInst = atoll(body.c_str());
-                            id(conso_inst) = consoInst;
-                            
-          - http_request.get:
-                url: !lambda |-
-                    //static ESPTime start = ESPTime::from_epoch_utc(.timestamp - 86400*365);
-                    
-                    ESPTime now = id(esptime).now();
-                    now.hour=6;
-                    now.minute=0;
-                    now.second=0;
-                    //now.recalc_timestamp_local();
-                    now.recalc_timestamp_utc();
-                    long tsStart = now.timestamp;
+          - if:
+              condition:
+                wifi.connected:
+              then:
+                - http_request.get:
+                      url: !lambda |-
+                          static std::string url = "http://emoncms.clae.net/feed/value.json?id=258&apikey=16a80b4fd5c8422d73508519cca5562e";
+                          ESP_LOGI("custom", "URL is: %s", url.c_str());
+                          return url.c_str();
+                      capture_response: true
+                      max_response_buffer_size: 50000
+                      on_response:
+                          then:
+                              - lambda: |-
+                                  ESP_LOGI("custom", "Response2: %d %d %s", response->status_code,body.length(), body.c_str());
+                                  float consoInst = atoll(body.c_str());
+                                  id(conso_inst) = consoInst;
+                                  
+                - http_request.get:
+                      url: !lambda |-
+                          //static ESPTime start = ESPTime::from_epoch_utc(.timestamp - 86400*365);
+                          
+                          ESPTime now = id(esptime).now();
+                          now.hour=6;
+                          now.minute=0;
+                          now.second=0;
+                          //now.recalc_timestamp_local();
+                          now.recalc_timestamp_utc();
+                          long tsStart = now.timestamp;
 
-                    now.increment_day();
-                    now.recalc_timestamp_utc();
-                    //now.recalc_timestamp_local();
-                    long tsEnd = now.timestamp;
-                    ESP_LOGI("custom", "ts now is : %d %d", tsStart, tsEnd);
-                    
-                    static std::string startSt = esphome::to_string(tsStart);
-                    static std::string endSt = esphome::to_string(tsEnd);
-                    
-                    static std::string url = "https://emoncms.clae.net/feed/data.json?id=182&start=" + startSt + "&end=" + endSt + "&interval=7200&average=0&timeformat=unix&skipmissing=0&limitinterval=0&delta=1&apikey=16a80b4fd5c8422d73508519cca5562e";
-                    ESP_LOGI("custom", "URL is: %s", url.c_str());
-                    return url.c_str();
-                capture_response: true
-                max_response_buffer_size: 50000
-                on_response:
-                    then:
-                        - lambda: |-
-                            ESP_LOGI("custom", "Response2: %d %d %s", response->status_code,body.length(), body.c_str());
-                            
-                            DynamicJsonDocument doc(50000);
-                            deserializeJson(doc, body.c_str());
-                            JsonArray arr = doc.as<JsonArray>();
-                            ESP_LOGI("custom", "Response3b:%d", arr.size());
-                            
-                            int totalHp = 0;
-                            int totalHc = 0;
-                            for (int idx=0;idx<arr.size();idx++) {
-                                JsonArray elm = arr[idx].as<JsonArray>();                         
-                                int val = elm[1].as<int>();
-                                if (idx<8)
-                                    totalHp += val;
-                                else
-                                    totalHc += val;
-                            }
+                          now.increment_day();
+                          now.recalc_timestamp_utc();
+                          //now.recalc_timestamp_local();
+                          long tsEnd = now.timestamp;
+                          ESP_LOGI("custom", "ts now is : %d %d", tsStart, tsEnd);
+                          
+                          static std::string startSt = esphome::to_string(tsStart);
+                          static std::string endSt = esphome::to_string(tsEnd);
+                          
+                          static std::string url = "https://emoncms.clae.net/feed/data.json?id=182&start=" + startSt + "&end=" + endSt + "&interval=7200&average=0&timeformat=unix&skipmissing=0&limitinterval=0&delta=1&apikey=16a80b4fd5c8422d73508519cca5562e";
+                          ESP_LOGI("custom", "URL is: %s", url.c_str());
+                          return url.c_str();
+                      capture_response: true
+                      max_response_buffer_size: 50000
+                      on_response:
+                          then:
+                              - lambda: |-
+                                  ESP_LOGI("custom", "Response2: %d %d %s", response->status_code,body.length(), body.c_str());
+                                  
+                                  json::parse_json(body, [](JsonVariant root) -> bool {
+                                    JsonArray arr = root.as<JsonArray>();
+                                    ESP_LOGI("custom", "Response3b:%d", arr.size());
+                                  
+                                    int totalHp = 0;
+                                    int totalHc = 0;
+                                    for (int idx=0;idx<arr.size();idx++) {
+                                        JsonArray elm = arr[idx].as<JsonArray>();                         
+                                        int val = elm[1].as<int>();
+                                        if (idx<8)
+                                            totalHp += val;
+                                        else
+                                            totalHc += val;
+                                    }
 
+                                  
+                                    ESP_LOGI("custom", "Response3c:%d", totalHp);
+                                    ESP_LOGI("custom", "Response3d:%d", totalHc);
+                                  
+                                    float tarif_hp =  0;
+                                    float tarif_hc =  0;
+                                    
+                                    if (strcmp(id(today_color).c_str(), "RED")==0) {
+                                        tarif_hp = 0.6586;
+                                        tarif_hc = 0.1518;
+                                    }
+                                    else if (strcmp(id(today_color).c_str(), "BLUE")==0) {
+                                        tarif_hp = 0.1552;
+                                        tarif_hc = 0.1287;
+                                    }
+                                    else if (strcmp(id(today_color).c_str(), "WHITE")==0) {
+                                        tarif_hp = 0.1792;
+                                        tarif_hc = 0.1447;
+                                    }
+                              
                             
-                            ESP_LOGI("custom", "Response3c:%d", totalHp);
-                            ESP_LOGI("custom", "Response3d:%d", totalHc);
-                            
-                            float tarif_hp =  0;
-                            float tarif_hc =  0;
-                            
-                            if (strcmp(id(today_color).c_str(), "RED")==0) {
-                                tarif_hp = 0.6586;
-                                tarif_hc = 0.1518;
-                            }
-                            else if (strcmp(id(today_color).c_str(), "BLUE")==0) {
-                                tarif_hp = 0.1552;
-                                tarif_hc = 0.1287;
-                            }
-                            else if (strcmp(id(today_color).c_str(), "WHITE")==0) {
-                                tarif_hp = 0.1792;
-                                tarif_hc = 0.1447;
-                            }
-                      
-                    
-                            id(conso_today_hp) = totalHp/1000.00;
-                            id(conso_today_hc) = totalHc/1000.00;
-                            id(facture_today_hp) = (totalHp/1000.00)*tarif_hp;
-                            id(facture_today_hc) = (totalHc/1000.00)*tarif_hc;
+                                    id(conso_today_hp) = totalHp/1000.00;
+                                    id(conso_today_hc) = totalHc/1000.00;
+                                    id(facture_today_hp) = (totalHp/1000.00)*tarif_hp;
+                                    id(facture_today_hc) = (totalHc/1000.00)*tarif_hc;
 
-                            id(conso_tomorrow_hp) = 0;
-                            id(conso_tomorrow_hc) = 0;
-                            id(facture_tomorrow_hp) = 0;
-                            id(facture_tomorrow_hc) = 0;  
-
-                            
+                                    id(conso_tomorrow_hp) = 0;
+                                    id(conso_tomorrow_hc) = 0;
+                                    id(facture_tomorrow_hp) = 0;
+                                    id(facture_tomorrow_hc) = 0;  
+                                  
+                                    return true;
+                                  });
+              else:
+                - lambda: >-
+                      ESP_LOGI("custom", "No network(1), wait...");
       - seconds: "*"
         then:
           - lambda: >-
@@ -778,6 +790,9 @@ time:
                       return "0,1447 €";
                    else
                       return "NA €";                      
+                          
+
+                            
  
 ################################################################################
 # Sensors
@@ -827,16 +842,37 @@ text_sensor:
       id: ip_address
       name: "IP Address"
       entity_category: diagnostic
+      on_value:
+        then:
+          - lvgl.label.update:
+              id: esphome_ip_label
+              text:
+                format: "IP Address: %s"
+                args: ['id(ip_address).state.c_str()']
+
     ssid:
       id: ssid
       name: "Connected SSID"
       entity_category: diagnostic
+      on_value:
+        then:
+          - lvgl.label.update:
+              id: esphome_ssid_label
+              text:
+                format: "ssid: %s"
+                args: ['id(ssid).state.c_str()']
+
     mac_address:
       id: mac_address
       name: "Mac Address"
       entity_category: diagnostic
-
-
+      on_value:
+          then:
+            - lvgl.label.update:
+                id: esphome_mac_label
+                text:
+                  format: "MAC Address: %s"
+                  args: ['id(mac_address).state.c_str()']      
   - platform: version
     id: esphome_version
     name: "ESPHome Version"
@@ -877,13 +913,24 @@ lvgl:
       bg_opa: cover
       radius: 4
       pad_all: 2
+    - id: button
+      border_width: 1
+    - id: label_style
+      text_color: 0xff0000
+      bg_opa: cover
+      text_font: Roboto_20
+      bg_color: 0x00FF00
+      radius: 41
+      pad_all: 2
+      border_width: 1
 
   widgets: 
     - tabview:
         id: mainTabView
         position: top
         bg_color: my_black
-        size: 15%
+        size: 50
+        scrollable: false
         tab_style:
           border_color: 0xcccccc
           border_width: 1
@@ -1212,6 +1259,7 @@ lvgl:
                 on_press:
                   - lvgl.widget.show: boot_screen
 
+
     - obj:
         id: boot_screen
         x: 0
@@ -1224,8 +1272,6 @@ lvgl:
         pad_all: 0
         border_width: 0
         widgets:
-          - image:
-              src: boot_logo
           - spinner:
               align: CENTER
               y: 95
@@ -1241,23 +1287,17 @@ lvgl:
               id: esphome_mac_label
               x: 200
               y: 50  
-              text:
-                format: "MAC Address: %s"
-                args: [ 'id(mac_address).state.c_str()' ]                
+              text: "MAC Address:"
           - label:
               id: esphome_ip_label
               x: 200
               y: 65  
-              text:
-                format: "IP Address: %s"
-                args: [ 'id(ip_address).state.c_str()' ]                
+              text: "IP Address:"
           - label:
               id: esphome_ssid_label
               x: 200 
               y: 80
-              text:
-                format: "SSID: %s"
-                args: [ 'id(ssid).state.c_str()' ]                                
+              text: "SSID:"
           - label:
               x: 200
               y: 110  
@@ -1265,5 +1305,4 @@ lvgl:
               text:
                 format: "ESPHome Version: %s"
                 args: [ 'id(esphome_version).state.c_str()' ]
-        on_press:
-          - lvgl.widget.hide: boot_screen
+
