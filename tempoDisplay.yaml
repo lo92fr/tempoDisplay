@@ -2,7 +2,7 @@
 # Substitution Variables
 ################################################################################
 external_components:
-  - source: github://pr#9353
+  - source: github://pr#7884
     components: [http_request]
 
 substitutions:
@@ -40,7 +40,27 @@ globals:
     restore_value: no
     initial_value: ""
 
-  - id: conso_inst
+  - id: consoInst
+    type: float
+    restore_value: no
+    initial_value: "0"
+
+  - id: consoPac
+    type: float
+    restore_value: no
+    initial_value: "0"
+
+  - id: consoBaie
+    type: float
+    restore_value: no
+    initial_value: "0"
+
+  - id: consoMathias
+    type: float
+    restore_value: no
+    initial_value: "0"
+
+  - id: consoAdrien
     type: float
     restore_value: no
     initial_value: "0"
@@ -332,10 +352,12 @@ font:
     glyphs: "!\"%()+=,-_.:°0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz/\\[]|&@#'"
 
 image:
-  - file: https://www.iconarchive.com/download/i149661/simpleicons-team/simple/esphome.512.png
+  - file: https://www.esphome.io/favicon-512x512.png
     id: boot_logo
     resize: 200x200
     type: RGB565
+    transparency: alpha_channel
+    
     
 
 
@@ -353,7 +375,6 @@ interval:
           then:
             - lambda: |-
                 id(wifi_connection) = true;
-                ESP_LOGI("main", "wifi connected");
           else:
             - lambda: |-
                 id(wifi_connection) = false;
@@ -436,6 +457,7 @@ time:
                           then:
                               - lambda: |-
                                   ESP_LOGI("custom", "Response: %d %d %s", response->status_code,body.length(), body.c_str());
+                            
                                   json::parse_json(body, [](JsonObject root) -> bool {
                                   
                                       static ESPTime now = id(esptime).now();
@@ -504,17 +526,27 @@ time:
               then:
                 - http_request.get:
                       url: !lambda |-
-                          static std::string url = "http://emoncms.clae.net/feed/value.json?id=258&apikey=16a80b4fd5c8422d73508519cca5562e";
+                          static std::string url = "https://emoncms.clae.net/feed/fetch.json?ids=258,192,752,223,298,654,241&apikey=16a80b4fd5c8422d73508519cca5562e";
                           ESP_LOGI("custom", "URL is: %s", url.c_str());
                           return url.c_str();
+                      request_headers:
+                          Accept: "application/json"
                       capture_response: true
-                      max_response_buffer_size: 50000
+                      max_response_buffer_size: 5000
                       on_response:
                           then:
                               - lambda: |-
-                                  ESP_LOGI("custom", "Response2: %d %d %s", response->status_code,body.length(), body.c_str());
-                                  float consoInst = atoll(body.c_str());
-                                  id(conso_inst) = consoInst;
+                                  ESP_LOGI("custom", "Response: %d %d %s", response->status_code,body.length(), body.c_str());
+
+                                  auto arr = json::parse_json(body);
+                                  
+                                  id(consoInst) = static_cast<float>(arr[0].as<double>());
+                                  id(consoPac) = static_cast<float>(arr[1].as<double>());
+                                  id(consoBaie) = static_cast<float>(arr[2].as<double>());
+                                  id(consoMathias) = static_cast<float>(arr[3].as<double>());
+                                  id(consoAdrien) = static_cast<float>(arr[4].as<double>());
+                                  //id(consoFrigidaire) = static_cast<float>(arr[5].as<double>());
+                                  //id(consoChauffeEau) = static_cast<float>(arr[6].as<double>());
                                   
                 - http_request.get:
                       url: !lambda |-
@@ -532,24 +564,19 @@ time:
                           now.recalc_timestamp_utc();
                           //now.recalc_timestamp_local();
                           long tsEnd = now.timestamp;
-                          ESP_LOGI("custom", "ts now is : %d %d", tsStart, tsEnd);
                           
                           static std::string startSt = esphome::to_string(tsStart);
                           static std::string endSt = esphome::to_string(tsEnd);
                           
                           static std::string url = "https://emoncms.clae.net/feed/data.json?id=182&start=" + startSt + "&end=" + endSt + "&interval=7200&average=0&timeformat=unix&skipmissing=0&limitinterval=0&delta=1&apikey=16a80b4fd5c8422d73508519cca5562e";
-                          ESP_LOGI("custom", "URL is: %s", url.c_str());
                           return url.c_str();
                       capture_response: true
                       max_response_buffer_size: 50000
                       on_response:
                           then:
                               - lambda: |-
-                                  ESP_LOGI("custom", "Response2: %d %d %s", response->status_code,body.length(), body.c_str());
-                                  
                                   json::parse_json(body, [](JsonVariant root) -> bool {
                                     JsonArray arr = root.as<JsonArray>();
-                                    ESP_LOGI("custom", "Response3b:%d", arr.size());
                                   
                                     int totalHp = 0;
                                     int totalHc = 0;
@@ -562,10 +589,6 @@ time:
                                             totalHc += val;
                                     }
 
-                                  
-                                    ESP_LOGI("custom", "Response3c:%d", totalHp);
-                                    ESP_LOGI("custom", "Response3d:%d", totalHc);
-                                  
                                     float tarif_hp =  0;
                                     float tarif_hc =  0;
                                     
@@ -610,6 +633,24 @@ time:
                 args: [ 'id(current_time).state.c_str()' ] 
                 
                 
+          - lvgl.label.update:
+              id: label_0
+              bg_color: !lambda |-
+                if (strcmp(id(today_color).c_str(), "RED")==0)
+                    return lv_color_make(192,0,0);
+                else if (strcmp(id(today_color).c_str(), "BLUE")==0)
+                    return lv_color_make(70,114,196);
+                else if (strcmp(id(today_color).c_str(), "WHITE")==0)
+                    return lv_color_make(165,165,165);
+                return lv_color_make(40,40,40);   
+              text: !lambda |-
+                if (strcmp(id(today_color).c_str(), "RED")==0)
+                    return "RED";
+                else if (strcmp(id(today_color).c_str(), "BLUE")==0)
+                    return "BLUE";
+                else if (strcmp(id(today_color).c_str(), "WHITE")==0)
+                    return "WHITE";
+                return "NA";
           - lvgl.button.update:
               id: today_color_button_hp
               bg_color: !lambda |-
@@ -663,12 +704,40 @@ time:
                   - 'id(redRestant)'
                 
           - lvgl.label.update:
-              id: conso_instant
+              id: consoInstLbl
               text:
-                format: "%.0f W"
+                format: "Total: %.0f W"
                 args: 
-                  - 'id(conso_inst)'
-          
+                  - 'id(consoInst)'
+
+          - lvgl.label.update:
+              id: consoPacLbl
+              text:
+                format: "Pac: %.0f W"
+                args: 
+                  - 'id(consoPac)'
+        
+          - lvgl.label.update:
+              id: consoBaieLbl
+              text:
+                format: "Baie: %.0f W"
+                args: 
+                  - 'id(consoBaie)'
+
+          - lvgl.label.update:
+              id: consoMathiasLbl
+              text:
+                format: "Baie: %.0f W"
+                args: 
+                  - 'id(consoMathias)'
+
+          - lvgl.label.update:
+              id: consoAdrienLbl
+              text:
+                format: "Baie: %.0f W"
+                args: 
+                  - 'id(consoAdrien)'
+
           - lvgl.label.update:
               id: label_conso_today_hp
               text:
@@ -920,12 +989,18 @@ lvgl:
       bg_opa: cover
       text_font: Roboto_20
       bg_color: 0x00FF00
-      radius: 41
+      pad_all: 2
+      border_width: 1
+    - id: label_style2
+      text_color: 0xff0000
+      bg_opa: cover
+      text_font: Roboto_20
       pad_all: 2
       border_width: 1
 
   widgets: 
     - tabview:
+
         id: mainTabView
         position: top
         bg_color: my_black
@@ -941,96 +1016,21 @@ lvgl:
             id: tabview_tab_1
             widgets:
                 - label:
-                    id: label_1
+                    id: label_0
                     text_font: Roboto_20
-                    text_color: my_red
-                    text: Aujourd'hui
-                    x: 60
-                    y: 5
-                - label:
-                    id: label_2
-                    text_font: Roboto_20
-                    text_color: my_red
-                    text: Demain
-                    x: 280
-                    y: 5
-                - label:
-                    id: label_3
-                    text_font: Roboto_16
-                    text_color: my_blue
-                    text: 6 Heures
-                    x: 10
-                    y: 50
-                - label:
-                    id: label_4
-                    text_font: Roboto_16
-                    text_color: my_blue
-                    text: 22 Heures
-                    x: 115
-                    y: 50                    
-                - label:
-                    id: label_5
-                    text_font: Roboto_16
-                    text_color: my_blue
-                    text: 6 Heures
-                    x: 220
-                    y: 50
-                - label:
-                    id: label_6
-                    text_font: Roboto_16
-                    text_color: my_blue
-                    text: 22 Heures
-                    x: 325
-                    y: 50    
-                - line:
-                    points:
-                      - 5, 5
-                      - 5, 70
-                    line_width: 2
-                    line_color: 0x0000FF
-                    line_rounded: false                    
-                    line_dash_gap: 2
-                    line_dash_width: 6
-                - line:
-                    points:
-                      - 110, 30
-                      - 110, 70
-                    line_width: 2
-                    line_color: 0x0000FF
-                    line_rounded: false                    
-                    line_dash_gap: 2
-                    line_dash_width: 6
-                - line:
-                    points:
-                      - 215, 5
-                      - 215, 70
-                    line_width: 2
-                    line_color: 0x0000FF
-                    line_rounded: false                    
-                    line_dash_gap: 2
-                    line_dash_width: 6
-                - line:
-                    points:
-                      - 320, 30
-                      - 320, 70
-                    line_width: 2
-                    line_color: 0x0000FF
-                    line_rounded: false                    
-                    line_dash_gap: 2
-                    line_dash_width: 6
-                - line:
-                    points:
-                      - 430, 5
-                      - 430, 70
-                    line_width: 2
-                    line_color: 0x0000FF
-                    line_rounded: false                    
-                    line_dash_gap: 2
-                    line_dash_width: 6
+                    text_color: my_white
+                    text: Blanc HC
+                    styles: label_style
+                    x: 0
+                    y: 0
+                    width: 460
+                    height: 30
+                    text_align: CENTER
+                    pad_top: 5
                 - button:
-                    x: 10
-                    y: 80
-                    width: 100
+                    x: 0
+                    y: 40
+                    width: 115
                     height: 30
                     id: today_color_button_hp
                     radius: 0
@@ -1043,8 +1043,8 @@ lvgl:
                             return lv_color_make(249,251,178);
                 - button:
                     x: 115
-                    y: 80
-                    width: 100
+                    y: 40
+                    width: 115
                     height: 30
                     radius: 0
                     id: today_color_button_hc
@@ -1056,9 +1056,9 @@ lvgl:
                           bg_color: !lambda |-
                             return lv_color_make(249,251,178);
                 - button:
-                    x: 220
-                    y: 80
-                    width: 100
+                    x: 230
+                    y: 40
+                    width: 115
                     height: 30
                     radius: 0
                     id: tomorrow_color_button_hp
@@ -1070,9 +1070,9 @@ lvgl:
                           bg_color: !lambda |-
                             return lv_color_make(249,251,178);
                 - button:
-                    x: 325
-                    y: 80
-                    width: 100
+                    x: 345
+                    y: 40
+                    width: 115
                     height: 30
                     radius: 0
                     id: tomorrow_color_button_hc
@@ -1083,15 +1083,97 @@ lvgl:
                           text: HC
                           bg_color: !lambda |-
                             return lv_color_make(249,251,178);
+                - label:
+                    id: label_1
+                    text_font: Roboto_20
+                    text_color: my_red
+                    text: Aujourd'hui
+                    styles: label_style2
+                    x: 0
+                    y: 70
+                    width: 230
+                - label:
+                    id: label_2
+                    text_font: Roboto_20
+                    text_color: my_red
+                    text: Demain
+                    styles: label_style2
+                    x: 230
+                    y: 70
+                    width: 230
+                - label:
+                    id: label_3
+                    text_font: Roboto_16
+                    text_color: my_white
+                    text: 6 H
+                    x: -5
+                    y: 110
+                - label:
+                    id: label_4
+                    text_font: Roboto_16
+                    text_color: my_white
+                    text: 22 H
+                    x: 100
+                    y: 110                   
+                - label:
+                    id: label_5
+                    text_font: Roboto_16
+                    text_color: my_white
+                    text: 6 H
+                    x: 205
+                    y: 110
+                - label:
+                    id: label_6
+                    text_font: Roboto_16
+                    text_color: my_white
+                    text: 22 H
+                    x: 310
+                    y: 110   
                 - line:
                     points:
-                      - 430, 80
-                      - 460, 95
-                      - 430, 110
-                      - 430, 80
-                    line_width: 1
+                      - 5, 90
+                      - 5, 110
+                    line_width: 2
                     line_color: 0x0000FF
                     line_rounded: false                    
+                    line_dash_gap: 2
+                    line_dash_width: 6
+                - line:
+                    points:
+                      - 115, 70
+                      - 115, 110
+                    line_width: 2
+                    line_color: 0x00FF00
+                    line_rounded: false                    
+                    line_dash_gap: 2
+                    line_dash_width: 6
+                - line:
+                    points:
+                      - 230, 70
+                      - 230, 110
+                    line_width: 2
+                    line_color: 0x00FF00
+                    line_rounded: false                    
+                    line_dash_gap: 2
+                    line_dash_width: 6
+                - line:
+                    points:
+                      - 345, 70
+                      - 345, 110
+                    line_width: 2
+                    line_color: 0x00FF00
+                    line_rounded: false                    
+                    line_dash_gap: 2
+                    line_dash_width: 6
+                - line:
+                    points:
+                      - 430, 70
+                      - 430, 110
+                    line_width: 2
+                    line_color: 0x00FF00
+                    line_rounded: false                    
+                    line_dash_gap: 2
+                    line_dash_width: 6
                 - label:
                     id: label_header_price
                     text_font: Roboto_16
@@ -1189,18 +1271,35 @@ lvgl:
             id: tabview_tab_2
             widgets:
                 - label:
-                    id: conso_instant_lb
+                    id: consoInstLbl
                     text_font: Roboto_16
                     text_color: my_white
-                    text: Conso Instant
                     x: 10
                     y: 10
                 - label:
-                    id: conso_instant
+                    id: consoPacLbl
                     text_font: Roboto_16
                     text_color: my_white
-                    x: 130
-                    y: 10
+                    x: 10
+                    y: 30                    
+                - label:
+                    id: consoBaieLbl
+                    text_font: Roboto_16
+                    text_color: my_white
+                    x: 10
+                    y: 50                    
+                - label:
+                    id: consoMathiasLbl
+                    text_font: Roboto_16
+                    text_color: my_white
+                    x: 10
+                    y: 70                    
+                - label:
+                    id: consoAdrienLbl
+                    text_font: Roboto_16
+                    text_color: my_white
+                    x: 10
+                    y: 90                    
           - name: Calendrier
             id: tabview_tab_3
             widgets:
@@ -1272,6 +1371,8 @@ lvgl:
         pad_all: 0
         border_width: 0
         widgets:
+          - image:
+              src: boot_logo
           - spinner:
               align: CENTER
               y: 95
